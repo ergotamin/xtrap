@@ -1,0 +1,18 @@
+#!/bin/bash
+limiter_color='57'
+top_limiter='┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓'
+bottom_limiter='┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛'
+cursor_look=' >'
+cursor_fore_color='82'
+cursor_back_color='0'
+title_fore_color='226'
+title_back_color='0'
+options_fore_color='111'
+options_back_color='0'
+progressbar_sign='#'
+progress_text_fore_color='44'
+progress_text_back_color='0'
+progressbar_fore_color='42'
+progressbar_back_color='0'
+show_hint=true
+hint_color='238'

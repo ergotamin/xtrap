@@ -1,0 +1,521 @@
+#!/bin/bash
+# more tools at: https://xgit.ddns.net/ergotamin
+# xtrap - bootstrap your shell-dialogs
+# written 2017 - ergotamin
+#---------------------------
+#
+## output to stdout
+#
+OUT=/dev/tty
+STDOUT=/dev/stdout
+ER=$(tput setaf 196)
+CL=$(tput sgr0)
+tmp_file=/tmp/.xtrap
+#
+## terminal settings, temp-file, xtraprc-path
+#
+TERM=xterm-256color
+COLUMNS=70
+LINES=20
+export TERM
+export COLUMNS
+export LINES
+XTRAPRC=/etc/xtraprc
+#
+## default XTRAPRC generator
+#
+gen_xtrap_rc()
+{
+  echo "#!/bin/bash" > "$XTRAPRC"
+  echo "limiter_color='57'" >> "$XTRAPRC"
+  echo "top_limiter='┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓'" >> "$XTRAPRC"
+  echo "bottom_limiter='┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛'" >> "$XTRAPRC"
+  echo "cursor_look=' >'" >> "$XTRAPRC"
+  echo "cursor_fore_color='82'" >> "$XTRAPRC"
+  echo "cursor_back_color='0'" >> "$XTRAPRC"
+  echo "title_fore_color='226'" >> "$XTRAPRC"
+  echo "title_back_color='0'" >> "$XTRAPRC"
+  echo "options_fore_color='111'" >> "$XTRAPRC"
+  echo "options_back_color='0'" >> "$XTRAPRC"
+  echo "progressbar_sign='#'" >> "$XTRAPRC"
+  echo "progress_text_fore_color='44'" >> "$XTRAPRC"
+  echo "progress_text_back_color='0'" >> "$XTRAPRC"
+  echo "progressbar_fore_color='42'" >> "$XTRAPRC"
+  echo "progressbar_back_color='0'" >> "$XTRAPRC"
+  echo "show_hint=true" >> "$XTRAPRC"
+  echo "hint_color='238'" >> "$XTRAPRC"
+  chmod 775 $XTRAPRC
+}
+#
+## read the current cursor-position and echo to stdout
+#
+get_cursor_pos()
+{
+  ### tput cup $line $col
+  exec < /dev/tty
+  oldstty=$(stty -g)
+  stty raw -echo min 0
+  echo -en "\033[6n" > /dev/tty
+  IFS=';' read -r -d R -a pos
+  stty $oldstty
+  line=$((${pos[0]:2} - 1))
+  col=$((${pos[1]} - 1))
+  echo "$line"
+}
+#
+## checklist-function
+#
+xtrap_checklist()
+{
+  tput clear
+  ##
+  ### setting initial variables
+  ##
+  center_col=$((COLUMNS/2))
+  center_line=$((LINES/2))
+  title_col=$((center_col-3))
+  title_line=$((center_line-4))
+  option_col=$((center_col-10))
+  option_line=$((center_line-2))
+  cursor_col=$((center_col-12))
+  cursor_line=$option_line
+  options="$2"
+  options_count=$(echo $2 | sed 's/ //g' | sed 's/|/ /g' | wc -w)
+  i=$options_count
+  ##
+  ### push options in array[$options_count]
+  ##
+  while [ $i -gt 0 ]; do
+    option[$i]=$(echo $options | cut -d\| -f$i | cut -d: -f2)
+    i=$((i-1))
+  done
+  i=1
+  while [ $i -le $options_count ]; do
+    tag[$i]="[ ]"$(echo $options | cut -d\| -f$i | cut -d: -f1)
+    i=$((i+1))
+  done
+  ##
+  ### customizable colors/cursor via XTRAPRC - generate if non-exists
+  ##
+  if [ -f "$XTRAPRC" ]; then
+    source $XTRAPRC
+  else
+    gen_xtrap_rc $XTRAPRC
+    source $XTRAPRC
+  fi
+  CURSOR_FORMAT=$(tput setaf $cursor_fore_color)$(tput setab $cursor_back_color)
+  OPT_FORMAT=$(tput el1)$(tput setaf $options_fore_color)$(tput setab $options_back_color)
+  TITLE_FORMAT=$(tput cup $title_line $title_col)$(tput bold)$(tput smul)$(tput setaf $title_fore_color)$(tput setab $title_back_color)
+  TOP_LIMITER=$(tput cup $((title_line-2)) $((center_col-12)))$(tput setaf $limiter_color)"$top_limiter"
+  BOT_LIMITER=$(tput cup $((LINES-3)) $((center_col-12)))$(tput setaf $limiter_color)"$bottom_limiter"
+  if [ $show_hint == true ]; then
+    HINT=$(tput cup $LINES $((center_col-30)))$(tput setaf $hint_color)"Press Right-Arrow to check an Option,[Enter] to confirm or Left-Arrow to exit safely"
+  else
+    HINT=$(tput cup $LINES $((center_col)))$(tput setaf $hint_color)"v1.0"
+  fi
+  CURSOR="$CURSOR_FORMAT$cursor_look$CL"
+  TITLE="$TITLE_FORMAT$1$CL"
+  loop="true"
+  ###
+  #### main_menu-loop
+  ###
+  while [ "$loop" = true ]; do
+    echo "$TOP_LIMITER" > $OUT
+    echo "$TITLE" > $OUT
+    echo "$BOT_LIMITER" > $OUT
+    echo "$HINT" > $OUT
+    i=0
+    ###
+    #### echo each formatted option out of array
+    ###
+    while [ $i -ne $options_count ]; do
+      i=$((i+1))
+      echo "$(tput cup $((option_line+i-1)) $option_col)$OPT_FORMAT${tag[$i]}  ${option[$i]}$CL" > $OUT
+    done
+    read -n 3 -s -p "$(tput cup $cursor_line $cursor_col)$CURSOR" cursor_key > $OUT
+    ###
+    #### listen for up- or down-arrowkey, empty string = ENTER
+    ###
+      case $cursor_key in
+        *A)
+            cursor_line=$((cursor_line-1))
+            if [ "$((title_line+2))" -gt "$cursor_line" ]; then
+              cursor_line=$((cursor_line+options_count))
+            fi
+            ;;
+        *B)
+            cursor_line=$((cursor_line+1))
+            if [ "$((title_line+1+options_count))" -lt "$cursor_line" ]; then
+              cursor_line=$((cursor_line-options_count))
+            fi
+            ;;
+        *C)
+            #
+            ## pos of option - offset (-7, because line count begins at zero and option1 is at line 8)
+            #
+            pos_option_offset=$(($(get_cursor_pos)-7))
+            if [ "$(echo ${tag[$pos_option_offset]} | cut -d\[ -f2 | cut -d] -f1)" != "X" ]; then
+              tag[$pos_option_offset]="[X]$(echo ${tag[$pos_option_offset]} | cut -d] -f2)"
+              output[$pos_option_offset]="$(echo ${tag[$pos_option_offset]} | cut -d] -f2)"
+            else
+              tag[$pos_option_offset]="[ ]$(echo ${tag[$pos_option_offset]} | cut -d] -f2)"
+              unset output[$pos_option_offset]
+            fi
+            ;;
+        *D)
+            loop=false
+            ;;
+        "")
+            #
+            ## pos of option - offset (-7, because line count begins at zero and option1 is at line 8)
+            #
+            echo ${output[@]} > $STDOUT
+            loop=false
+            ;;
+        *)
+            ;;
+      esac
+  done
+  clear
+}
+#
+## menu-function
+#
+xtrap_menu()
+{
+  tput clear
+  ##
+  ### setting initial variables
+  ##
+  center_col=$((COLUMNS/2))
+  center_line=$((LINES/2))
+  title_col=$((center_col-2))
+  title_line=$((center_line-4))
+  option_col=$center_col
+  option_line=$((center_line-2))
+  cursor_col=$((center_col-2))
+  cursor_line=$option_line
+  options="$2"
+  options_count=$(echo $2 | sed 's/ //g' | sed 's/|/ /g' | wc -w)
+  i=$options_count
+  ##
+  ### push options in array[$options_count] / set colors
+  ##
+  while [ $i -gt 0 ]; do
+    option[$i]=$(echo $options | cut -d\| -f$i)
+    i=$((i-1))
+  done
+  unset i
+  ##
+  ### customizable colors/cursor via XTRAPRC - generate if non-exists
+  ##
+  if [ -f "$XTRAPRC" ]; then
+    source $XTRAPRC
+  else
+    gen_xtrap_rc $XTRAPRC
+    source $XTRAPRC
+  fi
+  CURSOR_FORMAT=$(tput setaf $cursor_fore_color)$(tput setab $cursor_back_color)
+  OPT_FORMAT=$(tput el1)$(tput setaf $options_fore_color)$(tput setab $options_back_color)
+  TITLE_FORMAT=$(tput cup $title_line $title_col)$(tput bold)$(tput smul)$(tput setaf $title_fore_color)$(tput setab $title_back_color)
+  TOP_LIMITER=$(tput cup $((title_line-2)) $((center_col-12)))$(tput setaf $limiter_color)"$top_limiter"
+  BOT_LIMITER=$(tput cup $((LINES-3)) $((center_col-12)))$(tput setaf $limiter_color)"$bottom_limiter"
+  if [ $show_hint == true ]; then
+    HINT=$(tput cup $LINES $((center_col-25)))$(tput setaf $hint_color)"Press [Enter] or Right-Arrow to confirm, or Left-Arrow to exit safely"
+  else
+    HINT=$(tput cup $LINES $((center_col)))$(tput setaf $hint_color)"v1.0"
+  fi
+  CURSOR="$CURSOR_FORMAT$cursor_look$CL"
+  TITLE="$TITLE_FORMAT$1$CL"
+  loop="true"
+  ###
+  #### main_menu-loop
+  ###
+  while [ "$loop" = true ]; do
+    echo "$TOP_LIMITER" > $OUT
+    echo "$TITLE" > $OUT
+    echo "$BOT_LIMITER" > $OUT
+    echo "$HINT" > $OUT
+    i=0
+    ###
+    #### echo each formatted option out of array
+    ###
+    while [ $i -ne $options_count ]; do
+      i=$((i+1))
+      echo "$(tput cup $((option_line+i-1)) $option_col)$OPT_FORMAT$i)${option[$i]}$CL" > $OUT
+    done
+    read -n 3 -s -p "$(tput cup $cursor_line $cursor_col)$CURSOR" cursor_key > $OUT
+    ###
+    #### listen for up- or down-arrowkey, empty string = ENTER
+    ###
+      case $cursor_key in
+        *A)
+            cursor_line=$((cursor_line-1))
+            if [ "$((title_line+2))" -gt "$cursor_line" ]; then
+              cursor_line=$((cursor_line+options_count))
+            fi
+            ;;
+        *B)
+            cursor_line=$((cursor_line+1))
+            if [ "$((title_line+1+options_count))" -lt "$cursor_line" ]; then
+              cursor_line=$((cursor_line-options_count))
+            fi
+            ;;
+        *C)
+            #
+            ## pos of option - offset (-7, because line count begins at zero and option1 is at line 8)
+            #
+            pos_option_offset=$(($(get_cursor_pos)-7))
+            echo $pos_option_offset
+            echo "${option[$pos_option_offset]}" > $STDOUT
+            loop=false
+            ;;
+        *D)
+            loop=false
+            ;;
+        "")
+            #
+            ## pos of option - offset (-7, because line count begins at zero and option1 is at line 8)
+            #
+            pos_option_offset=$(($(get_cursor_pos)-7))
+            echo $pos_option_offset
+            echo "${option[$pos_option_offset]}" > $STDOUT
+            loop=false
+            ;;
+        *)
+            ;;
+      esac
+  done
+  clear
+}
+#
+## yesno-question box
+#
+xtrap_yesno()
+{
+  tput clear
+  ##
+  ### setting initial variables
+  ##
+  center_col=$((COLUMNS/2))
+  center_line=$((LINES/2))
+  title_col=$((center_col-8))
+  title_line=$((center_line-4))
+  option_col=$center_col
+  option_line=$((center_line+3))
+  cursor_col=$((center_col-2))
+  cursor_line=$option_line
+  ##
+  ### customizable colors/cursor via XTRAPRC - generate if non-exists
+  ##
+  if [ -f "$XTRAPRC" ]; then
+    source $XTRAPRC
+  else
+    gen_xtrap_rc $XTRAPRC
+    source $XTRAPRC
+  fi
+  CURSOR_FORMAT=$(tput setaf $cursor_fore_color)$(tput setab $cursor_back_color)
+  OPT_FORMAT=$(tput el1)$(tput setaf $options_fore_color)$(tput setab $options_back_color)
+  TITLE_FORMAT=$(tput cup $title_line $title_col)$(tput bold)$(tput setaf $title_fore_color)$(tput setab $title_back_color)
+  TOP_LIMITER=$(tput cup $((title_line-2)) $((center_col-12)))$(tput setaf $limiter_color)"$top_limiter"
+  BOT_LIMITER=$(tput cup $((LINES-3)) $((center_col-12)))$(tput setaf $limiter_color)"$bottom_limiter"
+  if [ $show_hint == true ]; then
+    HINT=$(tput cup $LINES $((center_col-25)))$(tput setaf $hint_color)"Press [Enter] or Right-Arrow to confirm, or Left-Arrow to exit safely"
+  else
+    HINT=$(tput cup $LINES $((center_col)))$(tput setaf $hint_color)"v1.0"
+  fi
+  CURSOR="$CURSOR_FORMAT$cursor_look$CL"
+  QUESTION="$TITLE_FORMAT$1$CL"
+  YES=$(tput cup $option_line $option_col)"$OPT_FORMAT Yes, I confirm.$CL"
+  NO=$(tput cup $((option_line+1)) $option_col)"$OPT_FORMAT No.$CL"
+  loop="true"
+  ###
+  #### main_menu-loop
+  ###
+  while [ "$loop" = true ]; do
+    echo "$TOP_LIMITER" > $OUT
+    echo "$QUESTION" > $OUT
+    echo "$BOT_LIMITER" > $OUT
+    echo "$HINT" > $OUT
+    echo "$YES" > $OUT
+    echo "$NO" > $OUT
+    ###
+    #### listen for up- or down-arrowkey, empty string = ENTER
+    ###
+    read -n 3 -s -p "$(tput cup $cursor_line $cursor_col)$CURSOR" cursor_key > $OUT
+      case $cursor_key in
+        *A)
+            cursor_line=$((cursor_line-1))
+            if [ "$option_line" -gt "$cursor_line" ]; then
+              cursor_line="$((option_line+1))"
+            fi
+            ;;
+        *B)
+            cursor_line=$((cursor_line+1))
+            if [ "$((option_line+1))" -lt "$cursor_line" ]; then
+              cursor_line="$option_line"
+            fi
+            ;;
+        *C)
+            if [ $(get_cursor_pos) == $option_line ]; then
+              echo "YES" > $STDOUT
+            elif [ $(get_cursor_pos) == $((option_line+1)) ];then
+              echo "NO" > $STDOUT
+            fi
+            loop=false
+            ;;
+        *D)
+            loop=false
+            ;;
+        "")
+            if [ $(get_cursor_pos) == $option_line ]; then
+              echo "YES" > $STDOUT
+            elif [ $(get_cursor_pos) == $((option_line+1)) ];then
+              echo "NO" > $STDOUT
+            fi
+            loop=false
+            ;;
+        *)
+            ;;
+      esac
+  done
+  clear
+}
+#
+## progress-bar
+#
+xtrap_progressbar()
+{
+  tput clear
+  ##
+  ### setting initial variables
+  ##
+  center_col=$((COLUMNS/2))
+  center_line=$((LINES/2))
+  title_col=$((center_col-2))
+  title_line=$((center_line-4))
+  option_col=$center_col
+  option_line=$((center_line-2))
+  cursor_col=$((center_col-2))
+  cursor_line=$option_line
+  progress_line=$((option_line+3))
+  progress_col=$((center_col-11))
+  ##
+  ### customizable colors/cursor via XTRAPRC - generate if non-exists
+  ##
+  if [ -f "$XTRAPRC" ]; then
+    source $XTRAPRC
+  else
+    gen_xtrap_rc $XTRAPRC
+    source $XTRAPRC
+  fi
+  TITLE_FORMAT=$(tput cup $title_line $title_col)$(tput bold)$(tput smul)$(tput setaf $title_fore_color)$(tput setab $title_back_color)
+  TOP_BAR=$(tput cup $((option_line+2)) $((center_col-12)))$(tput setaf $limiter_color)"$top_limiter$CL"
+  BOT_BAR=$(tput cup $((option_line+4)) $((center_col-12)))$(tput setaf $limiter_color)"$bottom_limiter$CL"
+  PROGRESS=$(tput setaf $progressbar_fore_color)$(tput setab $progressbar_back_color)"$progressbar_sign$CL"
+  BAR=$(tput cup $progress_line $progress_col)"$PROGRESS$CL"
+  BAR_CENTER=$(tput cup $((progress_line-2)) $((center_col)))$(tput setaf $progress_text_fore_color)$(tput setab $progress_text_back_color)
+  if [ $show_hint == true ]; then
+    HINT=$(tput cup $LINES $((center_col-11)))$(tput setaf $hint_color)"Press [Enter] or Left-Arrow to exit"
+  else
+    HINT=$(tput cup $LINES $((center_col)))$(tput setaf $hint_color)"v1.0"
+  fi
+  CURSOR="$CURSOR_FORMAT$cursor_look$CL"
+  TITLE="$TITLE_FORMAT Please wait ... !$CL"
+  loop="true"
+  input=$1
+  while [ $input -le 100 ] 2> /dev/zero; do
+    echo "$TITLE" > $OUT
+    echo "$HINT" > $OUT
+    echo "$TOP_BAR" > $OUT
+    echo "$BOT_BAR" > $OUT
+    echo "$BAR" > $OUT
+    echo "$BAR_CENTER$input% Done..$CL" > $OUT
+    read input
+    count=$input
+    if [ $((count%3)) -eq 0 ]; then
+      BAR="$BAR$PROGRESS"
+    fi
+  done
+  clear
+}
+#
+## check first argument in case for options
+#
+case $1 in
+  -h|--help|"")
+      echo "  xtrap - bootstrap your shell-dialogs      " > $OUT
+      echo "                                            " > $OUT
+      echo "      Options:                              " > $OUT
+      echo "                                            " > $OUT
+      echo "  -m or --menu TITLE 'OPTION1|OPTION2|...'  " > $OUT
+      echo "                      Create an arrow-key selection-menu with TITLE" > $OUT
+      echo "                      and OPTIONS  (at least 2 '|'-seperated)"       > $OUT
+      echo "                      OPTION returns as full string to stdout      " > $OUT
+      echo "                                            " > $OUT
+      echo "  -yn or --yesno QUESTION                   " > $OUT
+      echo "                      Create a yes/no-dialog for QUESTION      " > $OUT
+      echo "                      Returning values are 'y' and 'n' to stdout" > $OUT
+      echo "                                            " > $OUT
+      echo "  -c or --checklist TITLE 'TAG1:ENTRY1|TAG2:ENTRY2|...'           " > $OUT
+      echo "                      Create a checklist with at least 2 TAG:ENTRY" > $OUT
+      echo "                      pairs, seperated by '|'. Replies an array of" > $OUT
+      echo "                      TAGs back to stdout                         " > $OUT
+      echo "                                            " > $OUT
+      echo "  INPUT | 'xtrap -p' or 'xtrap --progress'                       " > $OUT
+      echo "                      Creates a progress-bar that is listening to " > $OUT
+      echo "                      INPUT-command for integer-values in 1..100  " > $OUT
+      echo "                      Make sure there is no other output by INPUT " > $OUT
+      echo "                                            " > $OUT
+      exit 0
+      ;;
+  -c|--checklist)
+      if [ -n "$2" ] && [ -n "$3" ]; then
+        if [ $(($(echo "$3" | sed 's/ //g' | sed 's/:/ /g' | sed 's/|/ /g' | wc -w)%2)) -eq 0 ]; then
+          xtrap_checklist "$2" "$3"
+        else
+          echo "$ER TAG:ENTRY-list format is wrong  $CL"  > $OUT
+          exit 1
+        fi
+      else
+        echo "$ER Missing parameters for checklist !$CL" > $OUT
+        exit 1
+      fi
+      exit 0
+      ;;
+  -m|--menu)
+      if [ -n "$2" ] && [ -n "$3" ] && [ $(echo "$3" | sed 's/ //g' | sed 's/|/ /g' | wc -w) -gt 1 ]; then
+        xtrap_menu "$2" "$3"
+      else
+        echo "$ER Missing parameters for menu !$CL" > $OUT
+        exit 1
+      fi
+      exit 0
+      ;;
+  -yn|--yesno)
+      if [ -n "$2" ]; then
+        xtrap_yesno "$2"
+      else
+        echo "$ER Missing QUESTION for yes/no-dialog !$CL" > $OUT
+        exit 1
+      fi
+      exit 0
+      ;;
+  -p|--progress)
+      read input
+      if [ $input -lt 100 ] 2> /dev/zero; then
+        xtrap_progressbar $input
+      else
+        echo "$ER Input not an integer or in false range (1-100)!$CL" > $OUT
+        exit 1
+      fi
+      exit 0
+      ;;
+    *)
+      echo "$ER Invalid option                    $CL" > $OUT
+      echo "                                         " > $OUT
+      echo " -h or --help gives more information     " > $OUT
+      echo "                                         " > $OUT
+      exit 1
+      ;;
+esac
